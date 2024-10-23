@@ -6,6 +6,8 @@ import {
   Droppable,
   Draggable,
   DropResult,
+  DroppableProvided,
+  DraggableProvided,
 } from "react-beautiful-dnd";
 import {
   getColumns,
@@ -17,9 +19,11 @@ import {
   deleteColumn,
 } from "@/services/api";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 import TaskFormModal from "@/components/TaskFormModal";
 import TaskDetailsModal from "@/components/TaskDetailsModal";
 import SearchBar from "@/components/SearchBar";
+import { AxiosError } from "axios";
 
 interface Column {
   _id: string;
@@ -46,34 +50,33 @@ export default function Home() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [sortOption, setSortOption] = useState("recent");
+  const [isLoading, setIsLoading] = useState(true);
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      router.push("/login");
-    } else {
+    if (isAuthenticated && !authLoading) {
       fetchColumnsAndTasks();
     }
-  }, [router]);
-
-  useEffect(() => {
-    console.log("Tasks updated:", tasks);
-  }, [tasks]);
+  }, [isAuthenticated, authLoading]);
 
   const fetchColumnsAndTasks = async () => {
+    setIsLoading(true);
     try {
       const [columnsResponse, tasksResponse] = await Promise.all([
         getColumns(),
         getTasks(),
       ]);
-      console.log("Columns:", columnsResponse.data);
-      console.log("Tasks from API:", tasksResponse.data);
       setColumns(columnsResponse.data);
       setTasks(tasksResponse.data);
-      console.log("Tasks after setState:", tasks);
     } catch (error) {
       console.error("Error fetching data:", error);
+      if (error instanceof AxiosError && error.response?.status === 401) {
+        localStorage.removeItem("token");
+        router.push("/login");
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -243,6 +246,14 @@ export default function Home() {
     }
   };
 
+  if (authLoading || isLoading) {
+    return <div>Loading...</div>;
+  }
+
+  if (!isAuthenticated) {
+    return null; // or a custom unauthorized component
+  }
+
   return (
     <>
       <SearchBar onSearch={handleSearch} onSort={handleSort} />
@@ -251,13 +262,13 @@ export default function Home() {
           {columns.map((column) => (
             <div
               key={column._id}
-              className="bg-white p-4 rounded-lg shadow-md w-80 flex-shrink-0"
+              className="bg-white p-4 rounded-lg shadow-md w-80 flex-shrink-0 flex flex-col h-[calc(100vh-100px)]"
             >
               <div className="flex justify-between items-center mb-4 bg-blue-500 text-white p-2 rounded">
                 <h2 className="font-bold text-lg">{column.title}</h2>
                 <button
                   onClick={() => handleDeleteColumn(column._id)}
-                  className="text-white hover:bg-red-600 rounded-full p-1"
+                  className="text-white hover:bg-blue-600 rounded-full p-1"
                   title="Delete column"
                 >
                   <svg
@@ -282,64 +293,69 @@ export default function Home() {
                 isCombineEnabled={false}
                 ignoreContainerClipping={false}
               >
-                {(provided: any) => (
+                {(provided: DroppableProvided) => (
                   <div
                     {...provided.droppableProps}
                     ref={provided.innerRef}
-                    className="min-h-[50px]"
+                    className="flex-grow overflow-y-auto"
+                    style={{ minHeight: "100px" }}
                   >
-                    {filteredAndSortedTasks
-                      .filter(
-                        (task) =>
-                          task.column === column._id ||
-                          (task.column && task.column._id === column._id)
-                      )
-                      .map((task, index) => (
-                        <Draggable
-                          key={task._id}
-                          draggableId={task._id}
-                          index={index}
-                        >
-                          {(provided: any) => (
-                            <div
-                              ref={provided.innerRef}
-                              {...provided.draggableProps}
-                              {...provided.dragHandleProps}
-                              className="bg-blue-100 p-3 mb-2 rounded shadow"
-                            >
-                              <h3 className="font-semibold mb-1 text-black">
-                                {task.title}
-                              </h3>
-                              <p className="text-sm text-gray-600 mb-2">
-                                {task.description}
-                              </p>
-                              <p className="text-xs text-gray-500 mb-2">
-                                Created at: {formatDate(task.createdAt)}
-                              </p>
-                              <div className="flex justify-end space-x-2">
-                                <button
-                                  onClick={() => handleDeleteTask(task._id)}
-                                  className="text-white bg-red-500 hover:bg-red-600 px-2 py-1 rounded text-xs"
-                                >
-                                  Delete
-                                </button>
-                                <button
-                                  onClick={() => handleOpenEditTaskModal(task)}
-                                  className="text-white bg-blue-500 hover:bg-blue-600 px-2 py-1 rounded text-xs"
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  onClick={() => handleOpenTaskDetails(task)}
-                                  className="text-white bg-green-500 hover:bg-green-600 px-2 py-1 rounded text-xs"
-                                >
-                                  View Details
-                                </button>
+                    <div className="space-y-2">
+                      {filteredAndSortedTasks
+                        .filter((task) =>
+                          typeof task.column === "string"
+                            ? task.column === column._id
+                            : task.column._id === column._id
+                        )
+                        .map((task, index) => (
+                          <Draggable
+                            key={task._id}
+                            draggableId={task._id}
+                            index={index}
+                          >
+                            {(provided: DraggableProvided) => (
+                              <div
+                                ref={provided.innerRef}
+                                {...provided.draggableProps}
+                                {...provided.dragHandleProps}
+                                className="bg-blue-100 p-3 rounded shadow"
+                              >
+                                <h3 className="font-semibold mb-1 text-black">
+                                  {task.title}
+                                </h3>
+                                <p className="text-sm text-gray-600 mb-2">
+                                  {task.description}
+                                </p>
+                                <p className="text-xs text-gray-500 mb-2">
+                                  Created at: {formatDate(task.createdAt)}
+                                </p>
+                                <div className="flex justify-end space-x-2">
+                                  <button
+                                    onClick={() => handleDeleteTask(task._id)}
+                                    className="text-white bg-red-500 hover:bg-red-600 px-2 py-1 rounded text-xs"
+                                  >
+                                    Delete
+                                  </button>
+                                  <button
+                                    onClick={() =>
+                                      handleOpenEditTaskModal(task)
+                                    }
+                                    className="text-white bg-blue-500 hover:bg-blue-600 px-2 py-1 rounded text-xs"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleOpenTaskDetails(task)}
+                                    className="text-white bg-green-500 hover:bg-green-600 px-2 py-1 rounded text-xs"
+                                  >
+                                    View Details
+                                  </button>
+                                </div>
                               </div>
-                            </div>
-                          )}
-                        </Draggable>
-                      ))}
+                            )}
+                          </Draggable>
+                        ))}
+                    </div>
                     {provided.placeholder}
                   </div>
                 )}

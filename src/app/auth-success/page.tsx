@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-export default function AuthSuccess() {
+export const dynamic = "force-dynamic";
+
+function AuthSuccessContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -14,11 +16,22 @@ export default function AuthSuccess() {
     if (token && userId) {
       localStorage.setItem("token", token);
       localStorage.setItem("userId", userId);
-      router.push("/");
+      // Small delay to ensure token is set
+      setTimeout(() => {
+        router.replace("/");
+      }, 100);
     } else {
-      router.push("/login");
+      router.replace("/login");
     }
   }, [router, searchParams]);
 
   return <div>Authenticating...</div>;
+}
+
+export default function AuthSuccess() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <AuthSuccessContent />
+    </Suspense>
+  );
 }
